@@ -16,7 +16,8 @@ global-ua: chrome               # 隐私优化：隐藏默认的 clash.meta UA �
 # 用 mmdb（geoip.metadb）而不是 .dat：客户端默认就缓存 mmdb，.dat 要额外下 16MB，
 # 测试时下不动就直接 Test failed（GUI 只显示 status 1）
 geodata-mode: false
-geo-auto-update: false          # 不主动联网拉库，避免导入订阅时因下载失败整份配置被判无效
+geo-auto-update: true           # 缓存存在时更新失败只记日志，不会让配置失效（已实测）
+geo-update-interval: 24
 etag-support: true              # 利用 ETag 避免重复下载未变更的外部资源
 
 geox-url:
