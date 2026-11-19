@@ -261,6 +261,7 @@ apply_all() {
         echo -e "${YELLOW}! 未安装 Caddy，跳过站点块${PLAIN}"
     fi
 
+    systemctl enable xray >/dev/null 2>&1 || true
     systemctl restart xray 2>/dev/null && echo -e "${GREEN}✓ Xray 已重启${PLAIN}" \
         || echo -e "${RED}✗ Xray 重启失败，看 journalctl -u xray${PLAIN}"
 }
