@@ -24,6 +24,8 @@ WEB_DIR="${CONF_DIR}/web"
 XRAY_CONF="/usr/local/etc/xray/config.json"
 CADDY_SITE="/etc/caddy/sites/raybox.caddy"
 CADDY_SUB="/etc/caddy/sites/raybox-sub.caddy"
+TEMPLATE_FILE="${CONF_DIR}/template.yaml"
+TEMPLATE_URL="https://raw.githubusercontent.com/comegome/Ray-Box/main/template.yaml"
 SCRIPT_URL="https://raw.githubusercontent.com/comegome/Ray-Box/main/raybox.sh"
 
 # 管道执行时 bash 与 read 抢同一条 stdin，提问会把脚本正文当答案吃掉
@@ -65,6 +67,9 @@ load_env() {
     source "$ENV_FILE"
     set -u
     SUB_PORT="${SUB_PORT:-8444}"
+    TLS_CERT="${TLS_CERT:-}"
+    TLS_KEY="${TLS_KEY:-}"
+    DIRECT_SUFFIXES="${DIRECT_SUFFIXES:-}"
     return 0
 }
 
@@ -75,6 +80,9 @@ DOMAIN="${DOMAIN}"
 SITE_ROOT="${SITE_ROOT}"
 FRONT_PORT="${FRONT_PORT}"
 SUB_PORT="${SUB_PORT:-8444}"
+TLS_CERT="${TLS_CERT:-}"
+TLS_KEY="${TLS_KEY:-}"
+DIRECT_SUFFIXES="${DIRECT_SUFFIXES:-}"
 UUID="${UUID}"
 SUB_TOKEN="${SUB_TOKEN}"
 EOF
@@ -159,6 +167,9 @@ render_caddy() {
     local out
     out="# Ray-Box - 由 raybox.sh 生成，请勿手改"$'\n'
     out+="${addr} {"$'\n'
+    if [[ -n "${TLS_CERT:-}" && -n "${TLS_KEY:-}" ]]; then
+        out+=$'\t'"tls ${TLS_CERT} ${TLS_KEY}"$'\n'
+    fi
     out+=$'\t'"root * ${SITE_ROOT}"$'\n'
     local name transport port path enc_srv enc_cli i=0
     if [[ -f "$NODES_FILE" ]]; then
@@ -186,10 +197,12 @@ render_caddy() {
 }
 
 render_sub_caddy() {
+    local tlsline=""
+    [[ -n "${TLS_CERT:-}" && -n "${TLS_KEY:-}" ]] && tlsline=$'	'"tls ${TLS_CERT} ${TLS_KEY}"$'\n'
     cat <<CADDY
 # Ray-Box 订阅服务 - 由 raybox.sh 生成
 ${DOMAIN}:${SUB_PORT} {
-	root * ${WEB_DIR}
+${tlsline}	root * ${WEB_DIR}
 	@sub path /${SUB_TOKEN}/* /${SUB_TOKEN}
 	handle @sub {
 		header Content-Type "text/plain; charset=utf-8"
@@ -267,7 +280,7 @@ apply_all() {
 }
 
 # ---------------------------------------------------------------- 订阅
-gen_mihomo() {
+gen_proxies() {
     load_env || return 1
     echo "proxies:"
     local name transport port path enc_srv enc_cli
@@ -295,22 +308,73 @@ gen_mihomo() {
             echo "        Host: ${DOMAIN}"
         fi
     done < "$NODES_FILE"
-    echo ""
-    echo "proxy-groups:"
-    echo "  - name: PROXY"
-    echo "    type: select"
-    echo -n "    proxies: ["
-    local first=1
+}
+
+gen_groups() {
+    load_env || return 1
+    local names="" first=1
     while IFS='|' read -r name _; do
         [[ -z "${name:-}" ]] && continue
-        [[ $first -eq 1 ]] || echo -n ", "
+        [[ $first -eq 1 ]] || names+=", "
         first=0
-        echo -n "\"${name}\""
+        names+="\"${name}\""
     done < "$NODES_FILE"
-    echo "]"
-    echo ""
-    echo "rules:"
-    echo "  - MATCH,PROXY"
+    cat <<EOF
+proxy-groups:
+  - name: 📌节点选择
+    type: select
+    proxies: [♻️自动选择, ${names}]
+  - name: ♻️自动选择
+    type: url-test
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    tolerance: 50
+    proxies: [${names}]
+EOF
+}
+
+ensure_template() {
+    [[ -f "$TEMPLATE_FILE" ]] && return 0
+    local d
+    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [[ -f "${d}/template.yaml" ]]; then
+        cp -f "${d}/template.yaml" "$TEMPLATE_FILE" && return 0
+    fi
+    curl -fsSL "$TEMPLATE_URL" -o "$TEMPLATE_FILE" 2>/dev/null && return 0
+    return 1
+}
+
+# 完整配置 = 模板 + 直连规则 + 动态节点 + 策略组
+build_full_config() {
+    local out="$1"
+    load_env || return 1
+    if ! ensure_template; then
+        echo -e "${RED}模板获取失败，无法生成完整配置${PLAIN}" >&2
+        return 1
+    fi
+    cat "$TEMPLATE_FILE" > "$out"
+
+    # 防死锁：节点域名必须直连，否则走代理去连代理自己
+    local rules="  - DOMAIN,${DOMAIN},DIRECT"
+    local s
+    for s in ${DIRECT_SUFFIXES:-}; do
+        rules+=$'\n'"  - DOMAIN-SUFFIX,${s},DIRECT"
+    done
+    # 用 awk 插入，sed 的 a 会吃掉行首缩进导致 YAML 解析失败
+    if grep -q '^rules:' "$out"; then
+        awk -v rule="$rules" '{print} /^rules:[[:space:]]*$/ && !done {print rule; done=1}' \
+            "$out" > "${out}.tmp" && mv -f "${out}.tmp" "$out"
+    else
+        printf 'rules:\n%s\n' "$rules" >> "$out"
+    fi
+
+    {
+        echo ""
+        echo "# ==================== Ray-Box 动态生成 ===================="
+        gen_proxies
+        echo ""
+        gen_groups
+    } >> "$out"
 }
 
 gen_singbox() {
@@ -359,14 +423,22 @@ gen_links() {
 
 write_sub_files() {
     load_env || return 1
-    mkdir -p "${WEB_DIR}/${SUB_TOKEN}"
-    gen_mihomo > "${WEB_DIR}/${SUB_TOKEN}/mihomo.yaml"
-    gen_singbox > "${WEB_DIR}/${SUB_TOKEN}/singbox.yaml"
-    gen_links > "${WEB_DIR}/${SUB_TOKEN}/links.txt"
-    echo -e "${GREEN}✓ 已写入 ${WEB_DIR}/${SUB_TOKEN}/${PLAIN}"
+    local dir="${WEB_DIR}/${SUB_TOKEN}"
+    mkdir -p "$dir"
+    if ! build_full_config "${dir}/config.yaml"; then
+        return 1
+    fi
+    cp -f "${dir}/config.yaml" "${dir}/mihomo.yaml"
+    gen_proxies > "${dir}/provider.yaml"
+    gen_singbox > "${dir}/singbox.yaml"
+    gen_links > "${dir}/links.txt"
+    echo -e "${GREEN}✓ 已写入 ${dir}/${PLAIN}"
+    echo "    config.yaml   完整配置（模板 + 节点 + 策略组）"
+    echo "    provider.yaml 只有 proxies，给 provider 用"
+    echo "    singbox.yaml  sing-box outbounds"
+    echo "    links.txt     vless:// 链接"
     if [[ "${SUB_PORT:-0}" != "0" ]]; then
-        echo "  订阅地址 https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/"
-        echo "    mihomo.yaml   singbox.yaml   links.txt"
+        echo "  订阅地址 https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/config.yaml"
     fi
 }
 
@@ -499,10 +571,23 @@ install_wizard() {
     read -r -p "订阅服务端口 [8444]（0 = 不启用）: " subport
     subport="${subport:-8444}"
 
+    local tlscert tlskey
+    read -r -p "已有证书 fullchain 路径（留空 = Caddy 自动签发）: " tlscert
+    tlskey=""
+    if [[ -n "$tlscert" ]]; then
+        read -r -p "私钥路径: " tlskey
+        if [[ ! -f "$tlscert" || ! -f "$tlskey" ]]; then
+            echo -e "${RED}证书或私钥不存在，改回自动签发${PLAIN}"
+            tlscert=""; tlskey=""
+        fi
+    fi
+
     DOMAIN="$domain"
     SITE_ROOT="$site"
     FRONT_PORT="$port"
     SUB_PORT="$subport"
+    TLS_CERT="$tlscert"
+    TLS_KEY="$tlskey"
     UUID=$(xray uuid)
     SUB_TOKEN=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
     save_env
@@ -570,7 +655,7 @@ menu_sub() {
         local opt=""
         read -r -p "请输入选项 [0-4]: " opt || opt="0"
         case "$opt" in
-            1) echo ""; gen_mihomo; echo ""; pause ;;
+            1) echo ""; local _t; _t=$(mktemp --suffix=.yaml); build_full_config "$_t" && cat "$_t"; rm -f "$_t"; echo ""; pause ;;
             2) echo ""; gen_singbox; echo ""; pause ;;
             3) echo ""; gen_links; echo ""; pause ;;
             4) write_sub_files; pause ;;

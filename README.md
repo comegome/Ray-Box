@@ -74,6 +74,15 @@ sudo bash /tmp/raybox.sh
 
 订阅菜单输出三种格式，sing-box 会自动跳过 XHTTP 和加密节点并注明原因。
 
+`config.yaml` 是**完整配置**：`template.yaml`（TUN / DNS / sniffer / 分流规则）+ 自动注入的节点直连规则 + `proxies` + `proxy-groups`。策略组固定为：
+
+```
+📌节点选择   select    ♻️自动选择 / 各节点
+♻️自动选择   url-test  全部节点，300s 间隔，50ms 容差
+```
+
+`provider.yaml` 只有 `proxies`，给需要 provider 的场景用。
+
 ## 文件
 
 ```
@@ -82,11 +91,12 @@ sudo bash /tmp/raybox.sh
 /usr/local/etc/xray/config.json
 /etc/caddy/sites/raybox.caddy      443 站点 + 节点反代
 /etc/caddy/sites/raybox-sub.caddy  订阅服务（默认 8444）
-/etc/raybox/web/<token>/           mihomo.yaml / singbox.yaml / links.txt
+/etc/raybox/web/<token>/           config.yaml / provider.yaml / singbox.yaml / links.txt
+/etc/raybox/template.yaml          完整配置模板（缺失时从仓库拉取）
 /usr/local/share/ray-box/raybox.sh  → /usr/local/bin/raybox
 ```
 
-订阅地址：`https://<域名>:8444/<token>/mihomo.yaml`
+订阅地址：`https://<域名>:8444/<token>/config.yaml`
 
 ## 实测矩阵（mihomo v1.19.34 + Xray 26.11.9）
 
