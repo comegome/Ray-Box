@@ -98,6 +98,13 @@ node_count() {
 
 # ---------------------------------------------------------------- 工具
 rand_path() { echo "/assets/$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"; }
+gen_uuid() {
+    if command -v xray >/dev/null 2>&1; then
+        xray uuid
+    else
+        cat /proc/sys/kernel/random/uuid
+    fi
+}
 is_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
 
 xray_ver() {
@@ -588,7 +595,8 @@ install_wizard() {
     SUB_PORT="$subport"
     TLS_CERT="$tlscert"
     TLS_KEY="$tlskey"
-    UUID=$(xray uuid)
+    UUID=$(gen_uuid)
+    [[ -z "$UUID" ]] && { echo -e "${RED}UUID 生成失败，请检查 xray 或 /proc${PLAIN}"; return 1; }
     SUB_TOKEN=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
     save_env
     : > "$NODES_FILE"
