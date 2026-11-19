@@ -13,10 +13,10 @@ keep-alive-interval: 15         # TCP Keep-Alive 探测包间隔（秒）
 global-ua: chrome               # 隐私优化：隐藏默认的 clash.meta UA 指纹，伪装为常规浏览器
 
 # GEO 数据库设置
-geodata-mode: true              # 使用 dat 格式数据库
-geodata-loader: standard        # 速度优化：使用标准内存加载器提升匹配吞吐量（内存极小设备可改回 memconservative）
-geo-auto-update: true
-geo-update-interval: 24
+# 用 mmdb（geoip.metadb）而不是 .dat：客户端默认就缓存 mmdb，.dat 要额外下 16MB，
+# 测试时下不动就直接 Test failed（GUI 只显示 status 1）
+geodata-mode: false
+geo-auto-update: false          # 不主动联网拉库，避免导入订阅时因下载失败整份配置被判无效
 etag-support: true              # 利用 ETag 避免重复下载未变更的外部资源
 
 geox-url:
