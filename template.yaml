@@ -32,8 +32,8 @@ profile:
 # 参考文档: https://wiki.metacubex.one/config/inbound/tun/
 tun:
   enable: true
-  stack: mips                   # 配合 bbr 使用
-  congestion-controller: bbr    # 仅 mips 栈生效
+  stack: gvisor                 # 兼容性优先：mips 需要 mihomo ≥1.19.34，旧内核会直接报 invalid tun stack
+  congestion-controller: bbr    # 仅部分栈生效
   auto-route: true
   strict-route: true
   auto-detect-interface: true

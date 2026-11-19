@@ -142,6 +142,9 @@ Caddy 重启、证书续期失败、站点目录被删，节点全部不可用�
 **11. Caddy reload 碰到 UDP 监听会卡死。**
 站点块从「只有 TCP」变成「新增 HTTP/3（UDP）」时，`systemctl reload caddy` 会报 `listen udp :8444: bind: address already in use`，单元卡在 `reloading`，旧配置继续跑。必须 `systemctl restart caddy`。脚本在 reload 后检查状态，卡住会自动改成重启。
 
+**12. `tun.stack` 不要写 `mips`。**
+`mips` 只在 mihomo ≥1.19.34 才被接受，旧内核直接报 `invalid tun stack`，客户端只显示一句 `Test failed, status 1`，看不出是哪个字段。模板默认用 `gvisor`，实测 1.19.10 / 1.19.20 / 1.19.34 都能通过。
+
 ## 和 Simple-Box 的差异
 
 ```
