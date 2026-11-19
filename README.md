@@ -1,79 +1,88 @@
 # Ray-Box
 
-在 Xray 核心上跑 VLESS 节点，藏在一个真实的 HTTPS 站点后面。
+基于 **Xray 核心**的 VLESS 节点管理面板，仿 [Simple-Box](https://github.com/comegome/Simple-Box) 的交互式设计。
 
-和 simbo（simple-box）思路相同，但核心换成 Xray，并且**不碰 REALITY**——原因见下面的「坑」。
+节点藏在一个真实的 HTTPS 站点后面：Caddy 占 443 提供站点与证书，按路径把流量反代到 loopback 上的 Xray。
 
 ## 两种传输
 
 ```
-xhttp   VLESS + XHTTP + TLS   伪装最好，只有 mihomo 系客户端能用
-ws      VLESS + WS   + TLS    mihomo 和 sing-box 都能用
+XHTTP   VLESS + XHTTP + TLS   伪装最好，只有 mihomo / ClashX Meta 系能用
+WS      VLESS + WS   + TLS    mihomo 和 sing-box 都能用
 ```
 
 两种都可以叠加 **VLESS Encryption**（后量子密钥交换 + 长度填充）：
 
 ```
-none      不加密（默认，靠 TLS 保护）
-x25519    认证用 X25519，握手仍是后量子安全，参数字符串短
-mlkem     认证用 ML-KEM-768，全后量子，参数字符串约 1800 字符
+none      不加密，靠 TLS 保护（WS 节点默认，为了兼容 sing-box）
+x25519    认证用 X25519，握手仍是后量子安全，参数短（XHTTP 节点默认）
+mlkem     认证用 ML-KEM-768，全后量子，参数约 1800 字符
 ```
 
 ## 架构
 
 ```
-443  Caddy（真实证书，站点 + 反代）
+443  Caddy（真实证书，站点 + 按路径反代）
      ├── /assets/<hex>  → 127.0.0.1:10000  (Xray XHTTP)
      ├── /assets/<hex>  → 127.0.0.1:10001  (Xray WS)
      └── 其他            → /var/www/<site>
 ```
 
-Xray 只监听 loopback，永远不直接面对公网。Caddy 负责证书、站点和路径分流。
+Xray 永远只监听 loopback。**站点挂了节点就挂**——这是伪装换来的代价，不是缺陷。
 
-**这意味着站点挂了节点就挂。** 这是设计取舍，不是 bug：没有独立于站点的入口，审查者才看不到破绽。
-
-## 前提
-
-```
-Xray >= 25.1      需要 vlessenc（VLESS Encryption）和 xhttp
-Caddy             443 上要有真实证书的站点
-Python 3.9+       只用标准库
-```
-
-## 快速开始
+## 安装
 
 ```bash
-# 1. 初始化：域名 + 站点目录
-python3 raybox.py init --domain hwsignal.yuzhaizu.com --site /var/www/hwsignal
-
-# 2. 加节点
-python3 raybox.py add-node --transport xhttp --name SL-XHTTP --encryption x25519
-python3 raybox.py add-node --transport ws    --name SL-WS    --encryption none
-
-# 3. 生成配置并重启
-python3 raybox.py apply
-
-# 4. 看订阅
-python3 raybox.py sub --format mihomo
-python3 raybox.py sub --format links
-python3 raybox.py sub --format singbox
+curl -fsSL https://raw.githubusercontent.com/comegome/Ray-Box/main/raybox.sh -o /tmp/raybox.sh
+sudo bash /tmp/raybox.sh
 ```
 
-状态文件 `/etc/raybox/state.json`（含 UUID、路径、加密参数，权限 600）。
-Xray 配置写 `/usr/local/etc/xray/config.json`，Caddy 块写 `/etc/caddy/sites/raybox.caddy`。
+首次运行进安装向导：填域名、站点根目录、对外端口，脚本自动装 Xray、写 `/etc/raybox/`、建立 `raybox` 命令。
 
-## 命令
+之后随时输入 `raybox` 打开面板。
+
+## 面板
 
 ```
-init        初始化：域名、站点目录、UUID、订阅 token
-add-node    添加节点（--transport xhttp|ws，--encryption none|x25519|mlkem）
-del-node    删除节点
-apply       生成 Xray 配置 + Caddy 块，校验后重启
-sub         输出订阅（mihomo / singbox / links）
-status      查看状态
+====================================================
+                  Ray-Box 控制台
+====================================================
+ 公网地址: 1.2.3.4
+ 域名    : hwsignal.yuzhaizu.com:443
+ 站点    : /var/www/hwsignal
+ Xray    : 运行中 (v26.11.9)
+ Caddy   : 运行中
+ 节点数  : 2
+====================================================
+ 1. 节点管理
+ 2. 订阅与链接
+ 3. 应用配置（写入 Xray + Caddy 并重启）
+ 4. 内核管理
+ 5. 更新脚本
+ 6. 卸载
+ 0. 退出
 ```
 
-`apply --print-caddy` 只打印 Caddy 块不写入，适合先看再放。
+节点管理里添加节点时只需要填名字，端口、路径、加密参数自动生成：
+
+```
+ 1. 添加 XHTTP 节点（伪装最好，仅 mihomo 系）
+ 2. 添加 WS 节点（mihomo + sing-box）
+ 3. 删除节点
+ 4. 应用配置（重启 Xray + 重载 Caddy）
+```
+
+订阅菜单输出三种格式，sing-box 会自动跳过 XHTTP 和加密节点并注明原因。
+
+## 文件
+
+```
+/etc/raybox/env.conf        域名、站点、UUID、订阅 token（600）
+/etc/raybox/nodes.conf      节点表：名称|传输|端口|路径|服务端密钥|客户端密钥（600）
+/usr/local/etc/xray/config.json
+/etc/caddy/sites/raybox.caddy
+/usr/local/share/ray-box/raybox.sh  → /usr/local/bin/raybox
+```
 
 ## 实测矩阵（mihomo v1.19.34 + Xray 26.11.9）
 
@@ -90,33 +99,33 @@ VLESS + XHTTP + REALITY             ✗  同上
 mihomo 在 REALITY 握手时把客户端版本写死成 1.8.2，Xray ≥ 26.7.11 校验最低客户端版本，直接拒绝。所有传输都一样，不是 XHTTP 独有的问题。mihomo issue #3039 / #3042，官方 wontfix。清空服务端 `minClientVer` / `maxClientVer` 也没用。
 
 **2. Caddy 的 `encode` 会打死 XHTTP。**
-XHTTP 是长连接的流式 HTTP 响应，gzip 会把它缓冲住，客户端表现为 `context deadline exceeded`。所以 `encode` 只能放在静态文件的 `handle` 里，不能放在站点顶层。Ray-Box 生成的配置已经这么处理了——这是第一版实测踩出来的。
+XHTTP 是长连接的流式 HTTP 响应，gzip 会把它缓冲住，客户端表现为 `context deadline exceeded`，而 WS 完全正常。`encode` 只能放在静态文件的 `handle` 里，不能放站点顶层。脚本生成的配置已经这么处理——这是第一版实测踩出来的。
 
 **3. XHTTP 只有 mihomo 系能用。**
-sing-box 不支持 xhttp 传输。订阅要分流：xhttp 节点只给 mihomo，ws 节点两边都给。`sub --format singbox` 会自动跳过 xhttp 节点并在文件头注明。
+sing-box 不支持 xhttp 传输。订阅要分流：xhttp 节点只给 mihomo，ws 节点两边都给。`sing-box` 订阅会自动跳过 xhttp 节点并注明。
 
 **4. 路径会被隧道独占。**
-`handle @rb0` 优先于 `file_server`，所以站点里如果真有 `/assets/<hex>` 这个文件，它就访问不到了。默认路径带 8 位随机 hex，撞上的概率可以忽略；但不要手改成 `/assets/logo.png` 这种。
+`handle @rb0` 优先于 `file_server`，站点里如果真有 `/assets/<hex>` 这个文件就访问不到了。默认路径带 8 位随机 hex，撞上的概率可以忽略；但不要手改成 `/assets/logo.png` 这种。
 
 **5. 443 只能有一个进程。**
-Ray-Box 假设 Caddy 占 443。如果机器上已经有 sing-box / nginx 占着 443，必须先把它们挪走，否则 Caddy 起不来（reload 会卡住，不是立刻报错）。
+Ray-Box 假设 Caddy 占 443。机器上已经有 sing-box / nginx 占着的话必须先挪走，否则 Caddy 起不来，而且 reload 是**卡住**不是立刻报错。
 
 **6. 端口要避开 UDP。**
-Caddy 绑端口时 TCP 和 UDP 一起绑。测试时把站点块放到 8443，和 sing-box 的 Hy2（UDP 8443）撞了，Caddy 直接起不来。选测试端口先 `ss -lnup` 看一眼。
+Caddy 绑端口是 TCP+UDP 一起绑。测试时把站点块放到 8443，和 sing-box 的 Hy2（UDP 8443）撞了，Caddy 直接起不来。选端口先 `ss -lnup` 看一眼。
 
 **7. 加密参数必须成对。**
-`xray vlessenc` 一次输出服务端 `decryption` 和客户端 `encryption`，改一个必须改另一个。Ray-Box 把成对的参数一起存在 state.json 里，`sub` 输出的就是配对的另一半。
+`xray vlessenc` 一次输出服务端 `decryption` 和客户端 `encryption`，改一个必须改另一个。脚本把成对参数存在 nodes.conf 里，订阅输出的就是配对的另一半。
 
 **8. mlkem 参数极长。**
-ML-KEM-768 认证的字符串约 1800 字符，订阅链接和二维码会很长，部分客户端 UI 会截断。握手本身在任何模式下都是后量子安全的，只有「认证」这一步分经典/后量子——所以默认建议 x25519。
+约 1800 字符，订阅链接和二维码会很长，部分客户端 UI 会截断。握手在任何模式下都是后量子安全的，只有「认证」这一步分经典/后量子——所以默认建议 x25519。
 
 **9. 不要设 flow。**
-`xtls-rprx-vision` 只在 TCP+TLS/REALITY 或 VLESS Encryption 下有效，配在 XHTTP/WS 上会失败。Ray-Box 不生成 flow 字段。
+`xtls-rprx-vision` 只对 TCP+TLS 或 VLESS Encryption 有效，配在 XHTTP/WS 上会失败。脚本不生成 flow 字段。
 
 **10. 站点与节点耦合。**
 Caddy 重启、证书续期失败、站点目录被删，节点全部不可用。监控要盯站点，不只是盯节点端口。
 
-## 和 simbo 的差异
+## 和 Simple-Box 的差异
 
 ```
 核心      Xray            sing-box
