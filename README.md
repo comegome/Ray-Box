@@ -80,9 +80,13 @@ sudo bash /tmp/raybox.sh
 /etc/raybox/env.conf        域名、站点、UUID、订阅 token（600）
 /etc/raybox/nodes.conf      节点表：名称|传输|端口|路径|服务端密钥|客户端密钥（600）
 /usr/local/etc/xray/config.json
-/etc/caddy/sites/raybox.caddy
+/etc/caddy/sites/raybox.caddy      443 站点 + 节点反代
+/etc/caddy/sites/raybox-sub.caddy  订阅服务（默认 8444）
+/etc/raybox/web/<token>/           mihomo.yaml / singbox.yaml / links.txt
 /usr/local/share/ray-box/raybox.sh  → /usr/local/bin/raybox
 ```
+
+订阅地址：`https://<域名>:8444/<token>/mihomo.yaml`
 
 ## 实测矩阵（mihomo v1.19.34 + Xray 26.11.9）
 
@@ -124,6 +128,9 @@ Caddy 绑端口是 TCP+UDP 一起绑。测试时把站点块放到 8443，和 si
 
 **10. 站点与节点耦合。**
 Caddy 重启、证书续期失败、站点目录被删，节点全部不可用。监控要盯站点，不只是盯节点端口。
+
+**11. Caddy reload 碰到 UDP 监听会卡死。**
+站点块从「只有 TCP」变成「新增 HTTP/3（UDP）」时，`systemctl reload caddy` 会报 `listen udp :8444: bind: address already in use`，单元卡在 `reloading`，旧配置继续跑。必须 `systemctl restart caddy`。脚本在 reload 后检查状态，卡住会自动改成重启。
 
 ## 和 Simple-Box 的差异
 

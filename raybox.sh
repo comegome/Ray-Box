@@ -23,6 +23,7 @@ NODES_FILE="${CONF_DIR}/nodes.conf"
 WEB_DIR="${CONF_DIR}/web"
 XRAY_CONF="/usr/local/etc/xray/config.json"
 CADDY_SITE="/etc/caddy/sites/raybox.caddy"
+CADDY_SUB="/etc/caddy/sites/raybox-sub.caddy"
 SCRIPT_URL="https://raw.githubusercontent.com/comegome/Ray-Box/main/raybox.sh"
 
 # 管道执行时 bash 与 read 抢同一条 stdin，提问会把脚本正文当答案吃掉
@@ -63,6 +64,7 @@ load_env() {
     # shellcheck disable=SC1090
     source "$ENV_FILE"
     set -u
+    SUB_PORT="${SUB_PORT:-8444}"
     return 0
 }
 
@@ -72,6 +74,7 @@ save_env() {
 DOMAIN="${DOMAIN}"
 SITE_ROOT="${SITE_ROOT}"
 FRONT_PORT="${FRONT_PORT}"
+SUB_PORT="${SUB_PORT:-8444}"
 UUID="${UUID}"
 SUB_TOKEN="${SUB_TOKEN}"
 EOF
@@ -182,6 +185,23 @@ render_caddy() {
     printf '%s' "$out"
 }
 
+render_sub_caddy() {
+    cat <<CADDY
+# Ray-Box 订阅服务 - 由 raybox.sh 生成
+${DOMAIN}:${SUB_PORT} {
+	root * ${WEB_DIR}
+	@sub path /${SUB_TOKEN}/* /${SUB_TOKEN}
+	handle @sub {
+		header Content-Type "text/plain; charset=utf-8"
+		file_server
+	}
+	handle {
+		respond 404
+	}
+}
+CADDY
+}
+
 apply_all() {
     load_env || return 1
     local tmp
@@ -195,17 +215,43 @@ apply_all() {
     fi
     mkdir -p "$(dirname "$XRAY_CONF")"
     mv "$tmp" "$XRAY_CONF"
-    chmod 600 "$XRAY_CONF"
+    # Xray 官方 unit 以 xray 用户运行，配置必须可读
+    if id xray >/dev/null 2>&1; then
+        chown xray:xray "$XRAY_CONF"
+        chmod 640 "$XRAY_CONF"
+    else
+        chmod 644 "$XRAY_CONF"
+    fi
     echo -e "${GREEN}✓ Xray 配置已写入${PLAIN}"
 
     if command -v caddy >/dev/null 2>&1; then
         mkdir -p "$(dirname "$CADDY_SITE")"
         render_caddy > "$CADDY_SITE"
+        if [[ "${SUB_PORT:-0}" != "0" ]] && [[ -s "$NODES_FILE" ]]; then
+            write_sub_files >/dev/null
+            render_sub_caddy > "$CADDY_SUB"
+        else
+            rm -f "$CADDY_SUB"
+        fi
         if caddy validate --config /etc/caddy/Caddyfile >/tmp/raybox-caddy.log 2>&1; then
             if systemctl reload caddy 2>/dev/null; then
-                echo -e "${GREEN}✓ Caddy 已重载${PLAIN}"
+                # 新增/变更 UDP 监听（HTTP/3）时 reload 可能卡在 reloading
+                local i
+                for i in $(seq 1 10); do
+                    [[ "$(systemctl is-active caddy 2>/dev/null)" == "active" ]] && break
+                    sleep 1
+                done
+                if [[ "$(systemctl is-active caddy 2>/dev/null)" == "active" ]]; then
+                    echo -e "${GREEN}✓ Caddy 已重载${PLAIN}"
+                else
+                    systemctl restart caddy 2>/dev/null \
+                        && echo -e "${GREEN}✓ Caddy 已重启（reload 卡住）${PLAIN}" \
+                        || echo -e "${RED}✗ Caddy 重启失败${PLAIN}"
+                fi
             else
-                echo -e "${YELLOW}! Caddy 重载失败（站点块可能占用已被 UDP 使用的端口）${PLAIN}"
+                systemctl restart caddy 2>/dev/null \
+                    && echo -e "${GREEN}✓ Caddy 已重启${PLAIN}" \
+                    || echo -e "${RED}✗ Caddy 重启失败${PLAIN}"
             fi
         else
             echo -e "${RED}✗ Caddy 配置校验失败，未重载${PLAIN}"
@@ -317,6 +363,10 @@ write_sub_files() {
     gen_singbox > "${WEB_DIR}/${SUB_TOKEN}/singbox.yaml"
     gen_links > "${WEB_DIR}/${SUB_TOKEN}/links.txt"
     echo -e "${GREEN}✓ 已写入 ${WEB_DIR}/${SUB_TOKEN}/${PLAIN}"
+    if [[ "${SUB_PORT:-0}" != "0" ]]; then
+        echo "  订阅地址 https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/"
+        echo "    mihomo.yaml   singbox.yaml   links.txt"
+    fi
 }
 
 # ---------------------------------------------------------------- 节点操作
@@ -444,9 +494,14 @@ install_wizard() {
     read -r -p "对外端口 [443]: " port
     port="${port:-443}"
 
+    local subport
+    read -r -p "订阅服务端口 [8444]（0 = 不启用）: " subport
+    subport="${subport:-8444}"
+
     DOMAIN="$domain"
     SITE_ROOT="$site"
     FRONT_PORT="$port"
+    SUB_PORT="$subport"
     UUID=$(xray uuid)
     SUB_TOKEN=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
     save_env
