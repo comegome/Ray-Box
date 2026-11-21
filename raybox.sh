@@ -97,6 +97,7 @@ SUB_PORT="${SUB_PORT:-8444}"
 TLS_CERT="${TLS_CERT:-}"
 TLS_KEY="${TLS_KEY:-}"
 DIRECT_SUFFIXES="${DIRECT_SUFFIXES:-}"
+NODE_PREFIX="${NODE_PREFIX:-}"
 UUID="${UUID}"
 SUB_TOKEN="${SUB_TOKEN}"
 EOF
@@ -582,11 +583,17 @@ add_node() {
 
     echo ""
     local name
-    if [[ -n "$name_hint" ]]; then
+    if [[ -n "$name_hint" ]] && [[ -n "$quiet" ]]; then
+        name="$name_hint"
+        echo "节点名称: ${name}"
+    elif [[ -n "$name_hint" ]]; then
         read -r -p "节点名称 [${name_hint}]: " name || name=""
         name="${name:-$name_hint}"
     else
-        read -r -p "节点名称（如 SL-${transport^^}）: " name
+        local _suffix="WebSocket"; [[ "$transport" == "xhttp" ]] && _suffix="XHTTP"
+        local _pfx="${NODE_PREFIX:-${DOMAIN%%.*}}"
+        read -r -p "节点名称 [${_pfx}-${_suffix}]: " name || name=""
+        name="${name:-${_pfx}-${_suffix}}"
     fi
     [[ -z "$name" ]] && { echo -e "${RED}名称不能为空${PLAIN}"; pause; return 1; }
     if [[ -f "$NODES_FILE" ]] && cut -d'|' -f1 "$NODES_FILE" | grep -qx "$name"; then
@@ -681,21 +688,27 @@ install_xray() {
 wizard_nodes() {
     load_env >/dev/null 2>&1 || true
     [[ -n "${DOMAIN:-}" ]] || return 0
-    local base="${DOMAIN%%.*}" yn
+    local base="${DOMAIN%%.*}" yn prefix
     echo ""
     echo -e "${BOLD}节点配置${PLAIN}（可跳过，之后在「1 节点管理」里补）"
 
+    read -r -p "  节点名前缀 [${NODE_PREFIX:-$base}]: " prefix || prefix=""
+    prefix="${prefix:-${NODE_PREFIX:-$base}}"
+    prefix="${prefix// /-}"
+    NODE_PREFIX="$prefix"
+    save_env
+
     echo ""
-    read -r -p "  添加 WS 节点（兼容全部客户端）？[Y/n]: " yn || yn=""
+    read -r -p "  添加 WebSocket 节点（兼容全部客户端）？[Y/n]: " yn || yn=""
     if [[ "$yn" != [nN]* ]]; then
-        add_node ws "${base}-WS" quiet
+        add_node ws "${prefix}-WebSocket" quiet
     else
-        echo "  已跳过 WS"
+        echo "  已跳过 WebSocket"
     fi
 
     read -r -p "  添加 XHTTP 节点（仅 mihomo 系）？[y/N]: " yn || yn=""
     if [[ "$yn" == [yY]* ]]; then
-        add_node xhttp "${base}-XHTTP" quiet
+        add_node xhttp "${prefix}-XHTTP" quiet
     else
         echo "  已跳过 XHTTP"
     fi
