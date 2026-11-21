@@ -564,13 +564,18 @@ write_sub_files() {
 # ---------------------------------------------------------------- 节点操作
 add_node() {
     load_env || return 1
-    local transport="$1"
+    local transport="$1" name_hint="${2:-}" quiet="${3:-}"
     local default_enc="none"
     [[ "$transport" == "xhttp" ]] && default_enc="x25519"
 
     echo ""
     local name
-    read -r -p "节点名称（如 SL-${transport^^}）: " name
+    if [[ -n "$name_hint" ]]; then
+        read -r -p "节点名称 [${name_hint}]: " name || name=""
+        name="${name:-$name_hint}"
+    else
+        read -r -p "节点名称（如 SL-${transport^^}）: " name
+    fi
     [[ -z "$name" ]] && { echo -e "${RED}名称不能为空${PLAIN}"; pause; return 1; }
     if [[ -f "$NODES_FILE" ]] && cut -d'|' -f1 "$NODES_FILE" | grep -qx "$name"; then
         echo -e "${RED}节点名已存在${PLAIN}"; pause; return 1
@@ -609,7 +614,8 @@ add_node() {
     echo "  路径  ${path}"
     echo "  加密  ${enc_kind}"
     echo ""
-    echo -e "${GREEN}正在应用配置...${PLAIN}"
+    if [[ -z "$quiet" ]]; then pause; fi
+    return 0
 }
 
 del_node() {
@@ -657,6 +663,31 @@ install_xray() {
         echo -e "${RED}✗ 安装失败，见 /tmp/raybox-xray-install.log${PLAIN}"
         return 1
     fi
+}
+
+# 安装向导里的节点引导：两个协议各问一次，回车跳过
+wizard_nodes() {
+    load_env >/dev/null 2>&1 || true
+    [[ -n "${DOMAIN:-}" ]] || return 0
+    local base="${DOMAIN%%.*}" yn
+    echo ""
+    echo -e "${BOLD}节点配置${PLAIN}（可跳过，之后在「1 节点管理」里补）"
+
+    echo ""
+    read -r -p "  添加 WS 节点（兼容全部客户端）？[Y/n]: " yn || yn=""
+    if [[ "$yn" != [nN]* ]]; then
+        add_node ws "${base}-WS" quiet
+    else
+        echo "  已跳过 WS"
+    fi
+
+    read -r -p "  添加 XHTTP 节点（仅 mihomo 系）？[y/N]: " yn || yn=""
+    if [[ "$yn" == [yY]* ]]; then
+        add_node xhttp "${base}-XHTTP" quiet
+    else
+        echo "  已跳过 XHTTP"
+    fi
+    return 0
 }
 
 install_wizard() {
@@ -729,8 +760,16 @@ install_wizard() {
     echo "  域名  ${DOMAIN}"
     echo "  站点  ${SITE_ROOT}"
     echo "  端口  ${FRONT_PORT}"
-    echo ""
-    echo "下一步：菜单 1 添加节点（添加后自动应用）"
+
+    wizard_nodes
+
+    if [[ -s "$NODES_FILE" ]]; then
+        echo ""
+        apply_all
+    else
+        echo ""
+        echo -e "${YELLOW}还没有节点，之后可在「1 节点管理」里添加${PLAIN}"
+    fi
     pause
 }
 
