@@ -221,19 +221,6 @@ render_caddy() {
 render_sub_caddy() {
     local tlsline=""
     [[ -n "${TLS_CERT:-}" && -n "${TLS_KEY:-}" ]] && tlsline=$'	'"tls ${TLS_CERT} ${TLS_KEY}"$'\n'
-    local xb="" name transport port path enc_srv enc_cli i=0
-    if [[ -f "$NODES_FILE" ]]; then
-        while IFS='|' read -r name transport port path enc_srv enc_cli; do
-            [[ -z "${name:-}" ]] && continue
-            if [[ "$transport" == "xhttp" ]]; then
-                xb+=$'\t'"@rbx${i} path ${path} ${path}/*"$'\n'
-                xb+=$'\t'"handle @rbx${i} {"$'\n'
-                xb+=$'\t\t'"reverse_proxy 127.0.0.1:${port}"$'\n'
-                xb+=$'\t}'$'\n'
-                i=$((i+1))
-            fi
-        done < "$NODES_FILE"
-    fi
     cat <<CADDY
 # Ray-Box 订阅服务 - 由 raybox.sh 生成
 ${DOMAIN}:${SUB_PORT} {
@@ -243,7 +230,7 @@ ${tlsline}	root * ${WEB_DIR}
 		header Content-Type "text/plain; charset=utf-8"
 		file_server
 	}
-${xb}	handle {
+	handle {
 		respond 404
 	}
 }
@@ -268,10 +255,16 @@ render_snippet() {
     if [[ -f "$NODES_FILE" ]]; then
         while IFS='|' read -r name transport port path enc_srv enc_cli; do
             [[ -z "${name:-}" ]] && continue
-            [[ "$transport" != "ws" ]] && continue
             echo "@rb${i} path ${path} ${path}/*"
             echo "handle @rb${i} {"
-            printf '\treverse_proxy 127.0.0.1:%s\n' "$port"
+            if [[ "$transport" == "xhttp" ]]; then
+                # 站点级 encode 会把 xhttp 流当文本压缩，导致握手超时；改类型让它跳过压缩
+                printf '\treverse_proxy 127.0.0.1:%s {\n' "$port"
+                printf '\t\theader_down Content-Type "application/octet-stream"\n'
+                printf '\t}\n' 
+            else
+                printf '\treverse_proxy 127.0.0.1:%s\n' "$port"
+            fi
             echo "}"
             i=$((i+1))
         done < "$NODES_FILE"
@@ -411,12 +404,10 @@ gen_proxies() {
     local name transport port path enc_srv enc_cli nport
     while IFS='|' read -r name transport port path enc_srv enc_cli; do
         [[ -z "${name:-}" ]] && continue
-        nport="$FRONT_PORT"
-        [[ "$transport" == "xhttp" ]] && nport="${SUB_PORT:-8444}"
         echo "  - name: \"${name}\""
         echo "    type: vless"
         echo "    server: ${DOMAIN}"
-        echo "    port: ${nport}"
+        echo "    port: ${FRONT_PORT}"
         echo "    uuid: ${UUID}"
         echo "    network: ${transport}"
         echo "    udp: true"
@@ -556,9 +547,7 @@ gen_links() {
         local enc_enc path_enc
         enc_enc=$(printf '%s' "$enc" | sed 's/:/%3A/g; s#/#%2F#g; s/+/%2B/g; s/=/%3D/g')
         path_enc=$(printf '%s' "$path" | sed 's#/#%2F#g')
-        local nport="$FRONT_PORT"
-        [[ "$transport" == "xhttp" ]] && nport="${SUB_PORT:-8444}"
-        echo "vless://${UUID}@${DOMAIN}:${nport}?encryption=${enc_enc}&security=tls&sni=${DOMAIN}&fp=chrome&type=${transport}&path=${path_enc}&host=${DOMAIN}#${name}"
+        echo "vless://${UUID}@${DOMAIN}:${FRONT_PORT}?encryption=${enc_enc}&security=tls&sni=${DOMAIN}&fp=chrome&type=${transport}&path=${path_enc}&host=${DOMAIN}#${name}"
     done < "$NODES_FILE"
 }
 

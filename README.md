@@ -187,3 +187,20 @@ Caddy 重启、证书续期失败、站点目录被删，节点全部不可用�
 耦合      站点挂=节点挂     节点独立
 客户端    mihomo 优先      mihomo + sing-box
 ```
+
+### 站点带 `encode` 时 XHTTP 的处理
+
+目标站点如果在**站点顶层**写了 `encode gzip`（`agisignal.yuzhaizu.com` 就是这样），Caddy 会把 XHTTP 的长连接流当文本压缩并缓冲，客户端握手超时——而 WebSocket 因为 `101 Switching Protocols` 会自动跳过压缩，所以表现为「WS 通、XHTTP 不通」。
+
+Ray-Box 的 snippet 里对 XHTTP 节点额外加了一个响应头覆写，让 `encode` 跳过这条路径：
+
+```
+@rb1 path /assets/<path> /assets/<path>/*
+handle @rb1 {
+	reverse_proxy 127.0.0.1:10001 {
+		header_down Content-Type "application/octet-stream"
+	}
+}
+```
+
+这样**不需要改目标站点的任何一行**（包括它的 `encode`），XHTTP 与 WS 都留在 443。
