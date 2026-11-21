@@ -478,6 +478,18 @@ build_full_config() {
         printf 'rules:\n%s\n' "$rules" >> "$out"
     fi
 
+    # 节点域名不能走 fake-ip：否则客户端拿到 198.18.x 的假地址去连代理，必然超时
+    local fip=$'    - "+.'"${DOMAIN}"$'"\n'
+    for s in ${DIRECT_SUFFIXES:-}; do
+        fip+=$'    - "+.'"${s}"$'"\n'
+    done
+    if grep -q '^  fake-ip-filter:' "$out"; then
+        printf '%s' "$fip" > "${out}.fip"
+        awk -v f="${out}.fip" '{print} /^  fake-ip-filter:[[:space:]]*$/ && !d {while ((getline l < f) > 0) print l; close(f); d=1}' \
+            "$out" > "${out}.tmp" && mv -f "${out}.tmp" "$out"
+        rm -f "${out}.fip"
+    fi
+
     {
         echo ""
         echo "# ==================== Ray-Box 动态生成 ===================="
