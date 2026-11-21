@@ -4,6 +4,39 @@
 
 节点藏在一个真实的 HTTPS 站点后面：Caddy 占 443 提供站点与证书，按路径把流量反代到 loopback 上的 Xray。
 
+## 与已有站点共存（attach 模式）
+
+机器上已经有 Caddy 站点（例如站点和代理共用同一个域名）时，Ray-Box **不再生成整块站点配置**，而是：
+
+```
+/etc/caddy/snippets/raybox.caddy     只含 @rbN path + reverse_proxy 的 handler
+/etc/caddy/sites/<你的站点>.caddy     只多一行 import /etc/caddy/snippets/raybox.caddy  # raybox-attach
+```
+
+站点自己的 `tls`、`root`、`try_files`、`header`、跳转全部保持原样。注入与移除由 `raybox-attach.py` 完成：
+
+```bash
+# 注入（幂等；找不到域名站点会以退出码 2 拒绝，括号不配平以 3 拒绝）
+sudo python3 /usr/local/share/raybox/raybox-attach.py attach \
+    --caddy-dir /etc/caddy --domain example.com \
+    --snippet /etc/caddy/snippets/raybox.caddy --backup --manifest /etc/raybox/attach.json
+
+# 移除（逐字节还原）
+sudo python3 /usr/local/share/raybox/raybox-attach.py detach \
+    --caddy-dir /etc/caddy --domain example.com
+```
+
+不管哪种模式，改完都必须 `caddy validate` 再 reload；顺序是"先写 snippet 再插 import"，卸载相反。
+
+### 测试
+
+```bash
+bash tests/test-attach.sh   # 18 项：插入位置、幂等、卸载还原、拒绝路径
+bash tests/test-e2e.sh      # 真实 Caddy + 假 Xray：注入后路径可达、卸载后回退
+```
+
+`test-e2e.sh` 只用 `127.0.0.1` 高位端口（18443/12019/11000）和 `/tmp` 目录，不碰系统 Caddy。
+
 ## 两种传输
 
 ```

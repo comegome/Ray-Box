@@ -1,0 +1,12 @@
+nested.example.com {
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'"
+	}
+	handle /api/* {
+		handle {
+			respond "{\"ok\":true}" 200
+		}
+	}
+	root * /srv/www
+	file_server
+}

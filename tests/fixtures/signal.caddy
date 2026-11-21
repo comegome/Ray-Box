@@ -1,0 +1,25 @@
+agisignal.yuzhaizu.com {
+	tls /etc/ssl/agisignal/fullchain.cer /etc/ssl/agisignal/private.key
+	root * /var/www/signal
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Cache-Control "public, max-age=60, must-revalidate"
+	}
+	@assets path /style.css /og.png /favicon.svg
+	header @assets Cache-Control "public, max-age=86400"
+
+	try_files {path} {path}.html {path}/index.html
+	file_server
+
+	handle_errors {
+		rewrite * /404.html
+		file_server
+	}
+}
+
+http://agisignal.yuzhaizu.com {
+	redir https://{host}{uri} permanent
+}
