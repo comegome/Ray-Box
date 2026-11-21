@@ -44,7 +44,14 @@ if [[ -z "${BASH_SOURCE[0]:-}" ]]; then
     exit 1
 fi
 
-[[ $EUID -ne 0 ]] && echo -e "${RED}错误: 必须使用 root 权限运行${PLAIN}" && exit 1
+# 非 root 时自动提权，输入 raybox 即可（免 sudo）
+if [[ $EUID -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+        exec sudo -E bash "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
+    fi
+    echo -e "${RED}错误: 必须使用 root 权限运行${PLAIN}"
+    exit 1
+fi
 
 get_arch() {
     case "$(uname -m)" in
@@ -809,7 +816,8 @@ menu() {
         load_env || true
 
         local ip xray_st caddy_st nodes
-        ip=$(curl -s4m3 https://icanhazip.com 2>/dev/null || echo "检测中...")
+        ip=$(curl -s4m3 http://checkip.amazonaws.com 2>/dev/null || dig +short +time=2 myip.opendns.com @resolver1.opendns.com 2>/dev/null | head -1 || echo "检测中...")
+        ip=${ip//[[:space:]]/}
         nodes=$(node_count)
 
         if command -v xray >/dev/null 2>&1; then
