@@ -58,7 +58,9 @@ def site_files(caddy_dir):
     sites = Path(caddy_dir) / "sites"
     if not sites.is_dir():
         return []
-    return sorted(p for p in sites.iterdir() if p.is_file() and p.suffix == ".caddy")
+    # 跳过 Ray-Box 自己生成的站点文件（raybox*.caddy），它们不是用户原有站点
+    return sorted(p for p in sites.iterdir()
+                  if p.is_file() and p.suffix == ".caddy" and not p.name.startswith("raybox"))
 
 
 def addresses_of(line):
@@ -164,6 +166,20 @@ def do_attach(args):
 
 
 def do_detach(args):
+    # 优先：哪个文件里有我们的标记就从哪个文件摘（不依赖域名匹配，避免误伤同域名的订阅站点）
+    for cand in site_files(args.caddy_dir):
+        raw = cand.read_text(encoding="utf-8")
+        if MARKER in raw:
+            if args.backup:
+                bak = "%s.raybox-bak-%s" % (cand, time.strftime("%Y%m%d%H%M%S"))
+                shutil.copy2(cand, bak)
+            kept = [ln for ln in raw.splitlines(keepends=True) if MARKER not in ln]
+            tmp = cand.with_suffix(cand.suffix + ".raybox-tmp")
+            tmp.write_text("".join(kept), encoding="utf-8")
+            tmp.replace(cand)
+            print("detached %s" % cand)
+            return 0
+
     path, lines, start, end = find_site_file(args.caddy_dir, args.domain)
     if path is None:
         die("没找到 %s 的站点块" % args.domain, 2)

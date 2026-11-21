@@ -67,6 +67,17 @@ python3 "$ATTACH" attach --caddy-dir "$WORK/broken" --domain bad.example.com --s
 rc=$?
 check "退出码 3" [ "$rc" -eq 3 ]
 
+echo "== 同域名订阅站点不能被误伤 =="
+mkdir -p "$WORK/sub/sites"
+cp "$HERE/fixtures/signal.caddy" "$WORK/sub/sites/signal.caddy"
+printf 'agisignal.yuzhaizu.com:8444 {\n\ttls internal\n\troot * /srv/sub\n\tfile_server\n}\n' > "$WORK/sub/sites/raybox-sub.caddy"
+printf '@rb0 path /assets/abc\nhandle @rb0 {\n\treverse_proxy 127.0.0.1:11000\n}\n' > "$WORK/sub/snip.caddy"
+python3 "$ATTACH" attach --caddy-dir "$WORK/sub" --domain agisignal.yuzhaizu.com --snippet "$WORK/sub/snip.caddy" >/dev/null 2>&1
+check "import 注入到 signal.caddy 而不是 raybox-sub.caddy" grep -q raybox-attach "$WORK/sub/sites/signal.caddy"
+check "订阅站点保持原样" sh -c "! grep -q raybox-attach '$WORK/sub/sites/raybox-sub.caddy'"
+python3 "$ATTACH" detach --caddy-dir "$WORK/sub" --domain agisignal.yuzhaizu.com >/dev/null 2>&1
+check "detach 后 signal.caddy 无残留" sh -c "! grep -q raybox-attach '$WORK/sub/sites/signal.caddy'"
+
 echo
 echo "结果: $PASS 通过, $FAIL 失败"
 [ "$FAIL" -eq 0 ]

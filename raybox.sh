@@ -299,7 +299,7 @@ uninstall_all() {
         fi
         python3 "$ATTACH_PY" detach --caddy-dir "$CADDY_DIR" --domain "$DOMAIN" --backup || {
             echo -e "${RED}✗ 摘除 import 失败，未删除任何文件${PLAIN}"; return 1; }
-        if grep -rqs "raybox-attach" "$CADDY_SITES_DIR"; then
+        if grep -qs "raybox-attach" "$CADDY_SITES_DIR"/*.caddy; then
             echo -e "${RED}✗ 站点里仍有 raybox-attach 标记，未删除任何文件${PLAIN}"
             return 1
         fi
