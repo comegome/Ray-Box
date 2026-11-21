@@ -288,8 +288,21 @@ apply_caddy_blocks() {
 # 卸载：先摘 import，再删 snippet / 站点块，最后校验再 reload
 uninstall_all() {
     load_env >/dev/null 2>&1 || true
-    if [[ -n "${DOMAIN:-}" && -f "$ATTACH_PY" ]]; then
-        python3 "$ATTACH_PY" detach --caddy-dir "$CADDY_DIR" --domain "$DOMAIN" --backup || true
+    if [[ -n "${DOMAIN:-}" ]]; then
+        local cand
+        for cand in "$ATTACH_PY" "$SCRIPT_DIR/raybox-attach.py" /usr/local/share/ray-box/raybox-attach.py; do
+            [[ -f "$cand" ]] && { ATTACH_PY="$cand"; break; }
+        done
+        if [[ ! -f "$ATTACH_PY" ]]; then
+            echo -e "${RED}✗ 找不到 raybox-attach.py，拒绝卸载（先摘 import 才能删 snippet）${PLAIN}"
+            return 1
+        fi
+        python3 "$ATTACH_PY" detach --caddy-dir "$CADDY_DIR" --domain "$DOMAIN" --backup || {
+            echo -e "${RED}✗ 摘除 import 失败，未删除任何文件${PLAIN}"; return 1; }
+        if grep -rqs "raybox-attach" "$CADDY_SITES_DIR"; then
+            echo -e "${RED}✗ 站点里仍有 raybox-attach 标记，未删除任何文件${PLAIN}"
+            return 1
+        fi
     fi
     rm -f "$CADDY_SITE" "$CADDY_SUB" "$CADDY_SNIPPET" "$ATTACH_MANIFEST"
     if command -v caddy >/dev/null 2>&1; then
@@ -689,6 +702,7 @@ install_wizard() {
 
     # 自安装：拷到固定位置并建立 raybox 命令
     mkdir -p /usr/local/share/ray-box
+    [[ -f "$SCRIPT_DIR/raybox-attach.py" ]] && install -m 755 "$SCRIPT_DIR/raybox-attach.py" /usr/local/share/ray-box/raybox-attach.py
     if [[ -f "${BASH_SOURCE[0]}" ]] && [[ "${BASH_SOURCE[0]}" != "/usr/local/share/ray-box/raybox.sh" ]]; then
         cp "${BASH_SOURCE[0]}" /usr/local/share/ray-box/raybox.sh
         chmod +x /usr/local/share/ray-box/raybox.sh
