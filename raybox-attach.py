@@ -153,6 +153,7 @@ def do_attach(args):
     tmp.replace(path)
 
     if args.manifest:
+        Path(args.manifest).parent.mkdir(parents=True, exist_ok=True)
         Path(args.manifest).write_text(
             json.dumps({"site_file": str(path), "domain": args.domain,
                         "snippet": str(snippet), "line": new_line.strip(),

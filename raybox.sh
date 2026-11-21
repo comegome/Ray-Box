@@ -24,6 +24,13 @@ WEB_DIR="${CONF_DIR}/web"
 XRAY_CONF="/usr/local/etc/xray/config.json"
 CADDY_SITE="/etc/caddy/sites/raybox.caddy"
 CADDY_SUB="/etc/caddy/sites/raybox-sub.caddy"
+CADDY_DIR="/etc/caddy"
+CADDY_SITES_DIR="${CADDY_DIR}/sites"
+CADDY_SNIPPET_DIR="/etc/caddy/snippets"
+CADDY_SNIPPET="${CADDY_SNIPPET_DIR}/raybox.caddy"
+ATTACH_PY="/usr/local/share/raybox/raybox-attach.py"
+ATTACH_MANIFEST="${CONF_DIR}/attach.json"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo /usr/local/share/raybox)"
 TEMPLATE_FILE="${CONF_DIR}/template.yaml"
 TEMPLATE_URL="https://raw.githubusercontent.com/comegome/Ray-Box/main/template.yaml"
 SCRIPT_URL="https://raw.githubusercontent.com/comegome/Ray-Box/main/raybox.sh"
@@ -222,6 +229,83 @@ ${tlsline}	root * ${WEB_DIR}
 CADDY
 }
 
+# 站点目录里是否已有这个域名的站点块（排除 Ray-Box 自己生成的）
+site_has_domain() {
+    local f
+    for f in "$CADDY_SITES_DIR"/*.caddy; do
+        [[ -f "$f" ]] || continue
+        [[ "$f" == "$CADDY_SITE" ]] && continue
+        grep -qE "^[[:space:]]*(https?://)?${DOMAIN//./\\.}(:[0-9]+)?[[:space:],{]" "$f" && { echo "$f"; return 0; }
+    done
+    return 1
+}
+
+# 只生成 handler（不含站点外壳），供 attach 模式 import
+render_snippet() {
+    local name transport port path enc_srv enc_cli i=0
+    echo "# Ray-Box - 由 raybox.sh 生成，通过 import 注入站点块，请勿手改"
+    if [[ -f "$NODES_FILE" ]]; then
+        while IFS='|' read -r name transport port path enc_srv enc_cli; do
+            [[ -z "${name:-}" ]] && continue
+            echo "@rb${i} path ${path} ${path}/*"
+            echo "handle @rb${i} {"
+            printf '\treverse_proxy 127.0.0.1:%s\n' "$port"
+            echo "}"
+            i=$((i+1))
+        done < "$NODES_FILE"
+    fi
+}
+
+# 有同域名站点就插 import，否则退回独立站点模式
+apply_caddy_blocks() {
+    local other
+    if other=$(site_has_domain); then
+        mkdir -p "$CADDY_SNIPPET_DIR"
+        render_snippet > "$CADDY_SNIPPET"
+        if [[ -f "$SCRIPT_DIR/raybox-attach.py" ]]; then
+            install -D -m 755 "$SCRIPT_DIR/raybox-attach.py" "$ATTACH_PY"
+        fi
+        if [[ ! -f "$ATTACH_PY" ]]; then
+            echo -e "${RED}✗ 缺少 raybox-attach.py，无法安全注入站点${PLAIN}"
+            return 1
+        fi
+        if python3 "$ATTACH_PY" attach --caddy-dir "$CADDY_DIR" --domain "$DOMAIN" \
+                --snippet "$CADDY_SNIPPET" --backup --manifest "$ATTACH_MANIFEST"; then
+            rm -f "$CADDY_SITE"
+            echo -e "${GREEN}✓ 已注入 $(basename "$other")（站点文件只多一行 import）${PLAIN}"
+        else
+            echo -e "${RED}✗ 注入站点失败，未重载 Caddy${PLAIN}"
+            return 1
+        fi
+    else
+        mkdir -p "$CADDY_SITES_DIR"
+        render_caddy > "$CADDY_SITE"
+        rm -f "$CADDY_SNIPPET"
+        echo -e "${GREEN}✓ 已写入独立站点 $CADDY_SITE${PLAIN}"
+    fi
+}
+
+# 卸载：先摘 import，再删 snippet / 站点块，最后校验再 reload
+uninstall_all() {
+    load_env >/dev/null 2>&1 || true
+    if [[ -n "${DOMAIN:-}" && -f "$ATTACH_PY" ]]; then
+        python3 "$ATTACH_PY" detach --caddy-dir "$CADDY_DIR" --domain "$DOMAIN" --backup || true
+    fi
+    rm -f "$CADDY_SITE" "$CADDY_SUB" "$CADDY_SNIPPET" "$ATTACH_MANIFEST"
+    if command -v caddy >/dev/null 2>&1; then
+        if caddy validate --config "$CADDY_DIR/Caddyfile" >/tmp/raybox-uninstall.log 2>&1; then
+            systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
+            echo -e "${GREEN}✓ Caddy 已重载${PLAIN}"
+        else
+            echo -e "${RED}✗ Caddy 校验失败，未重载；日志 /tmp/raybox-uninstall.log${PLAIN}"
+            tail -5 /tmp/raybox-uninstall.log
+        fi
+    fi
+    systemctl disable --now xray >/dev/null 2>&1 || true
+    rm -f "$XRAY_CONF"
+    rm -rf "$CONF_DIR"
+}
+
 apply_all() {
     load_env || return 1
     local tmp
@@ -245,15 +329,14 @@ apply_all() {
     echo -e "${GREEN}✓ Xray 配置已写入${PLAIN}"
 
     if command -v caddy >/dev/null 2>&1; then
-        mkdir -p "$(dirname "$CADDY_SITE")"
-        render_caddy > "$CADDY_SITE"
+        apply_caddy_blocks || return 1
         if [[ "${SUB_PORT:-0}" != "0" ]] && [[ -s "$NODES_FILE" ]]; then
             write_sub_files >/dev/null
             render_sub_caddy > "$CADDY_SUB"
         else
             rm -f "$CADDY_SUB"
         fi
-        if caddy validate --config /etc/caddy/Caddyfile >/tmp/raybox-caddy.log 2>&1; then
+        if caddy validate --config "$CADDY_DIR/Caddyfile" >/tmp/raybox-caddy.log 2>&1; then
             if systemctl reload caddy 2>/dev/null; then
                 # 新增/变更 UDP 监听（HTTP/3）时 reload 可能卡在 reloading
                 local i
@@ -775,10 +858,7 @@ menu() {
                 local c
                 read -r -p "确认卸载 Ray-Box？配置会删除，Xray 与 Caddy 保留 [y/N]: " c
                 if [[ "$c" == "y" || "$c" == "Y" ]]; then
-                    rm -f "$CADDY_SITE" "$XRAY_CONF"
-                    systemctl stop xray 2>/dev/null || true
-                    systemctl reload caddy 2>/dev/null || true
-                    rm -rf "$CONF_DIR"
+                    uninstall_all
                     echo -e "${GREEN}✓ 已卸载${PLAIN}"
                     exit 0
                 fi ;;
