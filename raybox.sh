@@ -765,19 +765,15 @@ menu_sub() {
         echo -e "${GRAY}====================== 订阅地址 ======================${PLAIN}"
         sub_urls
         echo -e "${GRAY}======================================================${PLAIN}"
-        echo " 1. 重新生成订阅文件"
-        echo " 2. 查看 mihomo 配置"
-        echo " 3. 查看 sing-box 配置"
-        echo " 4. 查看 vless 链接"
+        echo " 1. 查看 vless 链接（直接导入客户端）"
+        echo " 2. 查看 mihomo proxies 片段"
         echo " 0. 返回主菜单"
         echo -e "${GRAY}======================================================${PLAIN}"
         local opt=""
-        read -r -p "请输入选项 [0-4]: " opt || opt="0"
+        read -r -p "请输入选项 [0-2]: " opt || opt="0"
         case "$opt" in
-            1) write_sub_files; pause ;;
-            2) echo ""; local _t; _t=$(mktemp --suffix=.yaml); build_full_config "$_t" && cat "$_t"; rm -f "$_t"; echo ""; pause ;;
-            3) echo ""; gen_singbox; echo ""; pause ;;
-            4) echo ""; gen_links; echo ""; pause ;;
+            1) echo ""; gen_links; echo ""; pause ;;
+            2) echo ""; gen_proxies; echo ""; pause ;;
             0) break ;;
             *) echo -e "${RED}无效选项${PLAIN}"; sleep 1 ;;
         esac
