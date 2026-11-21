@@ -548,6 +548,7 @@ gen_links() {
 sub_urls() {
     [[ "${SUB_PORT:-0}" == "0" ]] && return 0
     echo "   mihomo/Clash   https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/mihomo.yaml"
+    echo "   provider       https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/provider.yaml"
     echo "   sing-box       https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/singbox.yaml"
     echo "   原生 vless     https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/links.txt"
 }
