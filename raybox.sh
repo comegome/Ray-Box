@@ -241,7 +241,7 @@ site_has_domain() {
     local f
     for f in "$CADDY_SITES_DIR"/*.caddy; do
         [[ -f "$f" ]] || continue
-        [[ "$f" == "$CADDY_SITE" ]] && continue
+        [[ "$(basename "$f")" == raybox* ]] && continue
         grep -qE "^[[:space:]]*(https?://)?${DOMAIN//./\\.}(:[0-9]+)?[[:space:],{]" "$f" && { echo "$f"; return 0; }
     done
     return 1
@@ -531,6 +531,14 @@ gen_links() {
     done < "$NODES_FILE"
 }
 
+# 三条订阅地址（写在首页和订阅菜单，不用记路径）
+sub_urls() {
+    [[ "${SUB_PORT:-0}" == "0" ]] && return 0
+    echo "   mihomo/Clash   https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/mihomo.yaml"
+    echo "   sing-box       https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/singbox.yaml"
+    echo "   原生 vless     https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/links.txt"
+}
+
 write_sub_files() {
     load_env || return 1
     local dir="${WEB_DIR}/${SUB_TOKEN}"
@@ -548,7 +556,8 @@ write_sub_files() {
     echo "    singbox.yaml  sing-box outbounds"
     echo "    links.txt     vless:// 链接"
     if [[ "${SUB_PORT:-0}" != "0" ]]; then
-        echo "  订阅地址 https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/config.yaml"
+        echo -e "${GRAY}订阅地址：${PLAIN}"
+        sub_urls
     fi
 }
 
@@ -600,8 +609,7 @@ add_node() {
     echo "  路径  ${path}"
     echo "  加密  ${enc_kind}"
     echo ""
-    echo -e "${YELLOW}执行「应用配置」后生效${PLAIN}"
-    pause
+    echo -e "${GREEN}正在应用配置...${PLAIN}"
 }
 
 del_node() {
@@ -617,7 +625,6 @@ del_node() {
     else
         echo -e "${RED}没有这个节点${PLAIN}"
     fi
-    pause
 }
 
 list_nodes() {
@@ -723,7 +730,7 @@ install_wizard() {
     echo "  站点  ${SITE_ROOT}"
     echo "  端口  ${FRONT_PORT}"
     echo ""
-    echo "下一步：菜单 1 添加节点，然后菜单 3 应用配置。"
+    echo "下一步：菜单 1 添加节点（添加后自动应用）"
     pause
 }
 
@@ -734,19 +741,17 @@ menu_nodes() {
         echo -e "${GRAY}====================== 节点管理 ======================${PLAIN}"
         list_nodes
         echo -e "${GRAY}======================================================${PLAIN}"
-        echo " 1. 添加 XHTTP 节点（伪装最好，仅 mihomo 系）"
-        echo " 2. 添加 WS 节点（mihomo + sing-box）"
+        echo " 1. 添加节点（WS，兼容全部客户端）"
+        echo " 2. 添加节点（XHTTP，仅 mihomo 系）"
         echo " 3. 删除节点"
-        echo " 4. 应用配置（重启 Xray + 重载 Caddy）"
         echo " 0. 返回主菜单"
         echo -e "${GRAY}======================================================${PLAIN}"
         local opt=""
-        read -r -p "请输入选项 [0-4]: " opt || opt="0"
+        read -r -p "请输入选项 [0-3]: " opt || opt="0"
         case "$opt" in
-            1) add_node xhttp ;;
-            2) add_node ws ;;
-            3) del_node ;;
-            4) apply_all; pause ;;
+            1) add_node ws   && { apply_all; pause; } ;;
+            2) add_node xhttp && { apply_all; pause; } ;;
+            3) del_node      && { apply_all; pause; } ;;
             0) break ;;
             *) echo -e "${RED}无效选项${PLAIN}"; sleep 1 ;;
         esac
@@ -757,20 +762,22 @@ menu_sub() {
     load_env || { echo -e "${RED}尚未初始化${PLAIN}"; pause; return; }
     while true; do
         [ -t 1 ] && clear
-        echo -e "${GRAY}====================== 订阅与链接 ====================${PLAIN}"
-        echo " 1. 显示 mihomo / ClashX Meta 订阅"
-        echo " 2. 显示 sing-box 订阅（自动跳过 XHTTP 与加密节点）"
-        echo " 3. 显示 vless:// 链接"
-        echo " 4. 写入订阅文件到 ${WEB_DIR}/${SUB_TOKEN}/"
+        echo -e "${GRAY}====================== 订阅地址 ======================${PLAIN}"
+        sub_urls
+        echo -e "${GRAY}======================================================${PLAIN}"
+        echo " 1. 重新生成订阅文件"
+        echo " 2. 查看 mihomo 配置"
+        echo " 3. 查看 sing-box 配置"
+        echo " 4. 查看 vless 链接"
         echo " 0. 返回主菜单"
         echo -e "${GRAY}======================================================${PLAIN}"
         local opt=""
         read -r -p "请输入选项 [0-4]: " opt || opt="0"
         case "$opt" in
-            1) echo ""; local _t; _t=$(mktemp --suffix=.yaml); build_full_config "$_t" && cat "$_t"; rm -f "$_t"; echo ""; pause ;;
-            2) echo ""; gen_singbox; echo ""; pause ;;
-            3) echo ""; gen_links; echo ""; pause ;;
-            4) write_sub_files; pause ;;
+            1) write_sub_files; pause ;;
+            2) echo ""; local _t; _t=$(mktemp --suffix=.yaml); build_full_config "$_t" && cat "$_t"; rm -f "$_t"; echo ""; pause ;;
+            3) echo ""; gen_singbox; echo ""; pause ;;
+            4) echo ""; gen_links; echo ""; pause ;;
             0) break ;;
             *) echo -e "${RED}无效选项${PLAIN}"; sleep 1 ;;
         esac
@@ -853,13 +860,17 @@ menu() {
         echo -e " Xray    : ${xray_st}"
         echo -e " Caddy   : ${caddy_st}"
         echo -e " 节点数  : ${nodes}"
+        if installed && [[ "${SUB_PORT:-0}" != "0" ]]; then
+            echo -e "${GRAY}----------------------------------------------------${PLAIN}"
+            echo -e " 订阅地址"
+            sub_urls
+        fi
         echo -e "${GRAY}====================================================${PLAIN}"
         echo " 1. 节点管理"
-        echo " 2. 订阅与链接"
-        echo " 3. 应用配置（写入 Xray + Caddy 并重启）"
-        echo " 4. 内核管理"
-        echo " 5. 更新脚本"
-        echo " 6. 卸载"
+        echo " 2. 订阅地址"
+        echo " 3. 内核与服务"
+        echo " 4. 更新脚本"
+        echo " 5. 卸载"
         echo " 0. 退出"
         echo -e "${GRAY}====================================================${PLAIN}"
         local opt=""
@@ -867,16 +878,15 @@ menu() {
         case "$opt" in
             1) menu_nodes ;;
             2) menu_sub ;;
-            3) apply_all; pause ;;
-            4) menu_core ;;
-            5)
+            3) menu_core ;;
+            4)
                 curl -fsSL "$SCRIPT_URL" -o /tmp/raybox.new 2>/dev/null \
                     && bash -n /tmp/raybox.new 2>/dev/null \
                     && cp /tmp/raybox.new "${BASH_SOURCE[0]}" \
                     && echo -e "${GREEN}✓ 已更新，重新运行生效${PLAIN}" \
                     || echo -e "${RED}更新失败${PLAIN}"
                 pause ;;
-            6)
+            5)
                 local c
                 read -r -p "确认卸载 Ray-Box？配置会删除，Xray 与 Caddy 保留 [y/N]: " c
                 if [[ "$c" == "y" || "$c" == "Y" ]]; then
