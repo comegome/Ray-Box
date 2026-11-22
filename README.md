@@ -129,7 +129,9 @@ sudo bash /tmp/raybox.sh
 /usr/local/share/ray-box/raybox.sh  → /usr/local/bin/raybox
 ```
 
-订阅地址：`https://<域名>:8444/<token>/config.yaml`
+订阅地址：`https://<订阅域名>:8444/<token>/config.yaml`
+
+订阅域名默认等于站点域名，可用 `/etc/raybox/env.conf` 的 `SUB_DOMAIN` 单独指定。**推荐把两者分开**：站点域名（`DOMAIN`）承载内容和伪装，订阅域名（`SUB_DOMAIN`）走接入域，一个域被封不会连带另一个。域名不同时订阅站点的证书由 Caddy 自动签发（HTTP-01，需要 80 端口可达），`TLS_CERT` 只对 `DOMAIN` 生效。
 
 ## 实测矩阵（mihomo v1.19.34 + Xray 26.11.9）
 

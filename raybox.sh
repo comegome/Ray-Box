@@ -81,6 +81,7 @@ load_env() {
     source "$ENV_FILE"
     set -u
     SUB_PORT="${SUB_PORT:-8444}"
+    SUB_DOMAIN="${SUB_DOMAIN:-$DOMAIN}"
     TLS_CERT="${TLS_CERT:-}"
     TLS_KEY="${TLS_KEY:-}"
     DIRECT_SUFFIXES="${DIRECT_SUFFIXES:-}"
@@ -94,6 +95,7 @@ DOMAIN="${DOMAIN}"
 SITE_ROOT="${SITE_ROOT}"
 FRONT_PORT="${FRONT_PORT}"
 SUB_PORT="${SUB_PORT:-8444}"
+SUB_DOMAIN="${SUB_DOMAIN:-$DOMAIN}"
 TLS_CERT="${TLS_CERT:-}"
 TLS_KEY="${TLS_KEY:-}"
 DIRECT_SUFFIXES="${DIRECT_SUFFIXES:-}"
@@ -219,11 +221,16 @@ render_caddy() {
 }
 
 render_sub_caddy() {
+    # 订阅域名可与站点域名不同（站点 = 伪装/内容域，订阅 = 接入域）。
+    # 域名不同时 TLS_CERT 属于站点域名，不能复用 → 交给 Caddy 自动签发。
+    local sub_domain="${SUB_DOMAIN:-$DOMAIN}"
     local tlsline=""
-    [[ -n "${TLS_CERT:-}" && -n "${TLS_KEY:-}" ]] && tlsline=$'	'"tls ${TLS_CERT} ${TLS_KEY}"$'\n'
+    if [[ "$sub_domain" == "$DOMAIN" && -n "${TLS_CERT:-}" && -n "${TLS_KEY:-}" ]]; then
+        tlsline=$'	'"tls ${TLS_CERT} ${TLS_KEY}"$'\n'
+    fi
     cat <<CADDY
 # Ray-Box 订阅服务 - 由 raybox.sh 生成
-${DOMAIN}:${SUB_PORT} {
+${sub_domain}:${SUB_PORT} {
 ${tlsline}	root * ${WEB_DIR}
 	@sub path /${SUB_TOKEN}/* /${SUB_TOKEN}
 	handle @sub {
@@ -554,10 +561,11 @@ gen_links() {
 # 三条订阅地址（写在首页和订阅菜单，不用记路径）
 sub_urls() {
     [[ "${SUB_PORT:-0}" == "0" ]] && return 0
-    echo "   mihomo/Clash   https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/mihomo.yaml"
-    echo "   provider       https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/provider.yaml"
-    echo "   sing-box       https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/singbox.yaml"
-    echo "   原生 vless     https://${DOMAIN}:${SUB_PORT}/${SUB_TOKEN}/links.txt"
+    local sd="${SUB_DOMAIN:-$DOMAIN}"
+    echo "   mihomo/Clash   https://${sd}:${SUB_PORT}/${SUB_TOKEN}/mihomo.yaml"
+    echo "   provider       https://${sd}:${SUB_PORT}/${SUB_TOKEN}/provider.yaml"
+    echo "   sing-box       https://${sd}:${SUB_PORT}/${SUB_TOKEN}/singbox.yaml"
+    echo "   原生 vless     https://${sd}:${SUB_PORT}/${SUB_TOKEN}/links.txt"
 }
 
 write_sub_files() {
